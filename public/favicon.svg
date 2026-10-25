@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <defs>
+    <!-- Clip path to keep white box strictly inside shield perimeter -->
+    <clipPath id="shield-boundary">
+      <path d="M 500 42
+               C 458 92 355 142 222 142
+               C 188 142 172 172 172 210
+               L 172 530
+               C 172 696 322 848 500 954
+               C 678 848 828 696 828 530
+               L 828 210
+               C 828 172 812 142 778 142
+               C 645 142 542 92 500 42 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- 1. Outer NFL Shield in Official Navy Blue (#01214D) -->
+  <path d="M 500 42
+           C 458 92 355 142 222 142
+           C 188 142 172 172 172 210
+           L 172 530
+           C 172 696 322 848 500 954
+           C 678 848 828 696 828 530
+           L 828 210
+           C 828 172 812 142 778 142
+           C 645 142 542 92 500 42 Z"
+        fill="#01214D" />
+
+  <!-- 2. Royal Blue Fleur-de-lis Emblem (#1B60D1) -->
+  <g fill="#1B60D1">
+    <!-- Center spear/petal with sharp point and elegant curve -->
+    <path d="M 500 102
+             C 522 152 568 225 568 296
+             C 568 360 540 395 528 406
+             L 472 406
+             C 460 395 432 360 432 296
+             C 432 225 478 152 500 102 Z" />
+
+    <!-- Left curved petal -->
+    <path d="M 466 404
+             C 432 394 374 362 332 322
+             C 278 272 272 212 316 194
+             C 346 182 390 200 410 244
+             C 424 278 432 350 466 404 Z" />
+
+    <!-- Right curved petal -->
+    <path d="M 534 404
+             C 568 394 626 362 668 322
+             C 722 272 728 212 684 194
+             C 654 182 610 200 590 244
+             C 576 278 568 350 534 404 Z" />
+
+    <!-- Horizontal crossbar ring -->
+    <rect x="420" y="398" width="160" height="34" rx="4" />
+
+    <!-- Lower Fleur-de-lis pedestal -->
+    <path d="M 460 432
+             L 540 432
+             C 530 468 518 500 500 520
+             C 482 500 470 468 460 432 Z" />
+    <path d="M 452 438
+             C 436 458 424 478 434 492
+             C 444 494 458 478 466 460
+             C 468 446 458 440 452 438 Z" />
+    <path d="M 548 438
+             C 564 458 576 478 566 492
+             C 556 494 542 478 534 460
+             C 532 446 542 440 548 438 Z" />
+  </g>
+
+  <!-- 3. Lower Container: Crisp White Field with Navy margins -->
+  <g clip-path="url(#shield-boundary)">
+    <path d="M 210 520
+             L 790 520
+             L 790 540
+             C 790 682 662 812 500 902
+             C 338 812 210 682 210 540
+             Z"
+          fill="#FFFFFF" />
+  </g>
+
+  <!-- 4. Iconic NFL letters in Bold Red (#D50A0A) -->
+  <g fill="#D50A0A">
+    <!-- Letter N with NFL serifs -->
+    <path d="M 276 544
+             L 348 544
+             L 348 578
+             L 332 578
+             L 332 666
+             L 396 544
+             L 450 544
+             L 450 780
+             L 390 780
+             L 390 742
+             L 404 742
+             L 404 644
+             L 336 780
+             L 276 780
+             L 276 742
+             L 294 742
+             L 294 578
+             L 276 578
+             Z" />
+
+    <!-- Letter F with NFL serifs and terminal cuts -->
+    <path d="M 470 544
+             L 596 544
+             L 596 618
+             L 572 618
+             L 572 584
+             L 534 584
+             L 534 646
+             L 578 646
+             L 578 684
+             L 534 684
+             L 534 768
+             L 554 768
+             L 554 808
+             L 470 808
+             L 470 768
+             L 490 768
+             L 490 584
+             L 470 584
+             Z" />
+
+    <!-- Letter L with NFL serifs and terminal cuts -->
+    <path d="M 624 544
+             L 698 544
+             L 698 584
+             L 678 584
+             L 678 734
+             L 744 734
+             L 744 700
+             L 778 700
+             L 778 780
+             L 624 780
+             L 624 742
+             L 644 742
+             L 644 584
+             L 624 584
+             Z" />
+  </g>
+</svg>

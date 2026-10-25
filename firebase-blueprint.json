@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile, credentials, and stats for a league member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "hasPassword": { "type": "boolean" },
+        "passwordHash": { "type": "string" },
+        "salt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "hasPassword"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Active user session token for persistent authentication",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" }
+      },
+      "required": ["token", "userId", "createdAt"]
+    },
+    "TournamentWeek": {
+      "title": "TournamentWeek",
+      "description": "Week configuration, match schedule and live status",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "number" },
+        "name": { "type": "string" },
+        "weekType": { "type": "string" },
+        "isLocked": { "type": "boolean" },
+        "isFinished": { "type": "boolean" },
+        "totalPot": { "type": "number" }
+      },
+      "required": ["weekId", "name", "weekType", "isLocked", "isFinished"]
+    },
+    "UserWeekPicks": {
+      "title": "UserWeekPicks",
+      "description": "Picks and confirmation status for a player in a specific week",
+      "type": "object",
+      "properties": {
+        "leagueId": { "type": "string" },
+        "season": { "type": "string" },
+        "weekId": { "type": "number" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "isSubmitted": { "type": "boolean" },
+        "submittedAt": { "type": "string" },
+        "picks": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["leagueId", "season", "weekId", "userId", "isSubmitted"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "League player profiles, secure credentials and stats"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Active authentication session tokens"
+    },
+    "/weeks/{weekId}": {
+      "schema": "TournamentWeek",
+      "description": "NFL schedule, scores, and status per week"
+    },
+    "/picks/{pickDocId}": {
+      "schema": "UserWeekPicks",
+      "description": "Picks made by a player in a specific week"
+    }
+  }
+}

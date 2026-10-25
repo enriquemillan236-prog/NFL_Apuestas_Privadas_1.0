@@ -1,0 +1,64 @@
+{
+  "users": {
+    "enrique": {
+      "id": "enrique",
+      "name": "Enrique",
+      "email": "enriquemillan236@gmail.com",
+      "hasPassword": false,
+      "passwordHash": null,
+      "salt": null,
+      "createdAt": null
+    },
+    "diego": {
+      "id": "diego",
+      "name": "Diego",
+      "email": "dmillane369@gmail.com",
+      "hasPassword": false,
+      "passwordHash": null,
+      "salt": null,
+      "createdAt": null
+    },
+    "adrian": {
+      "id": "adrian",
+      "name": "Adrián",
+      "email": "ayalamillanadrian@gmail.com",
+      "hasPassword": false,
+      "passwordHash": null,
+      "salt": null,
+      "createdAt": null
+    },
+    "alejandro": {
+      "id": "alejandro",
+      "name": "Alejandro",
+      "email": "alejandroamillan@hotmail.com",
+      "hasPassword": false,
+      "passwordHash": null,
+      "salt": null,
+      "createdAt": null
+    },
+    "andres": {
+      "id": "andres",
+      "name": "Andrés",
+      "email": "andresayalamillan@gmail.com",
+      "hasPassword": false,
+      "passwordHash": null,
+      "salt": null,
+      "createdAt": null
+    }
+  },
+  "recoveryRequests": [],
+  "sessions": {
+    "26f1c9ed77bc312fdbea09207d76b6d5e2690f516dfc563d7979d66992e53985": {
+      "token": "26f1c9ed77bc312fdbea09207d76b6d5e2690f516dfc563d7979d66992e53985",
+      "userId": "enrique",
+      "createdAt": "2026-09-14T13:55:10.170Z",
+      "expiresAt": "2026-10-14T13:55:10.170Z"
+    },
+    "cec9f6122a750a67e3e4dfda479c6a14f5ca33a99f191620ea82f7b3ab883562": {
+      "token": "cec9f6122a750a67e3e4dfda479c6a14f5ca33a99f191620ea82f7b3ab883562",
+      "userId": "enrique",
+      "createdAt": "2026-09-14T13:55:13.351Z",
+      "expiresAt": "2026-10-14T13:55:13.351Z"
+    }
+  }
+}

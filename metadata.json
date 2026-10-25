@@ -1,0 +1,8 @@
+{
+  "name": "NFL Apuestas Pro - Liga Privada 1.0",
+  "description": "Sistema privado de apuestas de la NFL para Enrique, Diego, Adrián, Alejandro y Andrés con gestión de partidos, pozo en Bolivianos y reglas oficiales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
