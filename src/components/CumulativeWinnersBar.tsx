@@ -20,7 +20,10 @@ export const CumulativeWinnersBar: React.FC<CumulativeWinnersBarProps> = ({
   );
 
   const completedWeeksCount = (Object.values(quinielaData.weeks || {}) as WeekState[]).filter(
-    (w) => w && (w.isFinished || (w.games?.length > 0 && w.games.every((g) => g.status === 'final')))
+    (w) =>
+      w &&
+      w.weekNumber >= 2 &&
+      (w.isFinished || (w.games?.length > 0 && w.games.every((g) => g.status === 'final')))
   ).length;
 
   return (

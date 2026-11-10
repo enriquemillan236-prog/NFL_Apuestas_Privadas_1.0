@@ -421,7 +421,7 @@ export function calculateCumulativeUserStats(
 ): CumulativeUserRecord[] {
   const userList: UserId[] = ['enrique', 'diego', 'adrian', 'alejandro', 'andres'];
 
-  // Track wins and picks across all weeks
+  // Track wins, picks, and earnings across all official weeks (Weeks 2..22)
   const winsMap: Record<UserId, Set<number>> = {
     enrique: new Set(),
     diego: new Set(),
@@ -446,21 +446,54 @@ export function calculateCumulativeUserStats(
     andres: 0,
   };
 
-  // Scan every week in the season
-  Object.values(weeks || {}).forEach((week) => {
-    if (!week) return;
+  const earningsMap: Record<UserId, number> = {
+    enrique: 0,
+    diego: 0,
+    adrian: 0,
+    alejandro: 0,
+    andres: 0,
+  };
 
-    // Check week winners if finished or if evaluation has winners
-    if (week.isFinished && Array.isArray(week.winners) && week.winners.length > 0) {
-      week.winners.forEach((uid) => {
-        if (winsMap[uid]) winsMap[uid].add(week.weekNumber);
-      });
-    } else if (week.isFinished && week.games && week.games.length > 0 && week.games.every((g) => g.status === 'final')) {
-      const result = evaluateWeekWinners(week, (week.userPicks || {}) as Record<UserId, Record<string, UserPick>>);
+  let carryOverPot = 0;
+
+  // Sort weeks chronologically (1..22)
+  const sortedWeeks = Object.values(weeks || {})
+    .filter((w): w is WeekState => Boolean(w))
+    .sort((a, b) => a.weekNumber - b.weekNumber);
+
+  sortedWeeks.forEach((week) => {
+    // Week 1 is inaugural ("No cuenta - Inaugural")
+    if (week.weekNumber === 1) return;
+
+    const allGamesFinal =
+      week.games && week.games.length > 0 && week.games.every((g) => g.status === 'final');
+    const isWeekDone = week.isFinished || allGamesFinal;
+
+    const effectiveWeek: WeekState = {
+      ...week,
+      rolledOverPot: week.rolledOverPot || carryOverPot,
+      totalPot: (week.basePot || BASE_WEEK_POT) + (week.rolledOverPot || carryOverPot),
+    };
+
+    if (isWeekDone) {
+      const result = evaluateWeekWinners(
+        effectiveWeek,
+        (week.userPicks || {}) as Record<UserId, Record<string, UserPick>>
+      );
+
       if (result.winners && result.winners.length > 0) {
         result.winners.forEach((uid) => {
           if (winsMap[uid]) winsMap[uid].add(week.weekNumber);
+          if (result.amountPerWinner > 0) {
+            earningsMap[uid] += result.amountPerWinner;
+          }
         });
+      }
+
+      if (result.potType === 'rollover_tie') {
+        carryOverPot = result.amountRolledOver;
+      } else if (result.winners.length > 0) {
+        carryOverPot = 0;
       }
     }
 
@@ -528,6 +561,7 @@ export function calculateCumulativeUserStats(
 
     const finalCorrectPicks = Math.max(profile.totalPicksCorrect || 0, correctPicksMap[uid]);
     const finalPicksMade = Math.max(profile.totalPicksMade || 0, totalPicksMadeMap[uid]);
+    const finalEarnings = Math.max(profile.earnings || 0, earningsMap[uid]);
 
     return {
       userId: uid,
@@ -540,15 +574,18 @@ export function calculateCumulativeUserStats(
       wonWeeksList,
       totalPicksCorrect: finalCorrectPicks,
       totalPicksMade: finalPicksMade,
-      earnings: profile.earnings || 0,
+      earnings: finalEarnings,
       isCurrentlyLeading: activeWeekLeaders.includes(uid),
     };
   }).sort((a, b) => {
-    // Sort by cumulative weeks won descending, then by total correct picks
+    // Sort by cumulative weeks won descending, then by total correct picks, then by earnings
     if (b.cumulativeWeeksWon !== a.cumulativeWeeksWon) {
       return b.cumulativeWeeksWon - a.cumulativeWeeksWon;
     }
-    return b.totalPicksCorrect - a.totalPicksCorrect;
+    if (b.totalPicksCorrect !== a.totalPicksCorrect) {
+      return b.totalPicksCorrect - a.totalPicksCorrect;
+    }
+    return b.earnings - a.earnings;
   });
 }
 

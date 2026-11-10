@@ -29,6 +29,7 @@ export default function App() {
   // Live NFL Sync state
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
+  const [hasUserSelectedWeek, setHasUserSelectedWeek] = useState<boolean>(false);
 
   const currentWeek: WeekState = data.weeks[data.currentWeekId] || data.weeks[2] || data.weeks[1];
   const activeUser = data.activeUserId ? data.users[data.activeUserId] : null;
@@ -173,6 +174,9 @@ export default function App() {
   const refreshTournamentState = useCallback(async () => {
     try {
       const serverState = await tournamentService.getState();
+      const unsyncedPastWeeks: number[] = [];
+      const nowMs = Date.now();
+
       setData((prev) => {
         // Merge serverState.weeks with prev.weeks without losing live games, quarters, clocks, or scores!
         const mergedWeeks: Record<number, WeekState> = { ...serverState.weeks };
@@ -187,6 +191,12 @@ export default function App() {
             const baseGames = prevWeek.games && prevWeek.games.length > 0 ? prevWeek.games : serverWeek.games;
             const combinedGames = mergeGameLists(baseGames, serverWeek.games);
             const isAllFinished = combinedGames.length > 0 && combinedGames.every((g) => g.status === 'final');
+
+            // Check if this week's kickoff has already passed by >12 hours and still has scheduled games
+            const firstKickoffMs = Date.parse(serverWeek.firstGameTime || '');
+            if (!isNaN(firstKickoffMs) && firstKickoffMs + 12 * 3600 * 1000 < nowMs && !isAllFinished) {
+              unsyncedPastWeeks.push(wId);
+            }
 
             // Deep merge userPicks so that existing picks in memory are NEVER wiped by an empty response
             const mergedUserPicks: Record<UserId, Record<string, UserPick>> = {
@@ -251,14 +261,22 @@ export default function App() {
           users: mergedUsers,
           weeks: mergedWeeks,
           activeUserId: prev.activeUserId,
-          currentWeekId: prev.currentWeekId || serverState.currentWeekId || 2,
+          currentWeekId: hasUserSelectedWeek
+            ? prev.currentWeekId
+            : serverState.currentWeekId || prev.currentWeekId || 2,
           hasCompletedSplash: prev.hasCompletedSplash,
         };
       });
+
+      if (unsyncedPastWeeks.length > 0) {
+        unsyncedPastWeeks.forEach((wId) => {
+          syncWeekData(wId, true);
+        });
+      }
     } catch (err) {
       console.warn('Could not refresh tournament state:', err);
     }
-  }, []);
+  }, [hasUserSelectedWeek, syncWeekData]);
 
   // Verify session and load persistent tournament state on startup
   useEffect(() => {
@@ -343,6 +361,7 @@ export default function App() {
 
   // Handle week selection
   const handleSelectWeek = (weekId: number) => {
+    setHasUserSelectedWeek(true);
     setData((prev) => ({
       ...prev,
       currentWeekId: weekId,
