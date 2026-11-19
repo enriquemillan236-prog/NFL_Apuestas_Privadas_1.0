@@ -181,6 +181,7 @@ async function startServer() {
   // Get current canonical tournament state from Cloud Firestore
   app.get('/api/tournament/state', async (req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       const state = await getFirestoreTournamentState();
       res.json({ success: true, data: state });
     } catch (err: any) {
@@ -245,8 +246,8 @@ async function startServer() {
         });
       }
 
-      await syncFirestoreGames(Number(weekId), games);
-      res.json({ success: true });
+      const mergedGames = await syncFirestoreGames(Number(weekId), games);
+      res.json({ success: true, games: mergedGames });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

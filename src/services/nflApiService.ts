@@ -97,6 +97,7 @@ export async function fetchNFLScoreboard(
     const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${targetWeek}&seasontype=${targetSeasonType}`;
 
     const res = await fetch(url, {
+      cache: 'no-store',
       headers: {
         Accept: 'application/json',
       },

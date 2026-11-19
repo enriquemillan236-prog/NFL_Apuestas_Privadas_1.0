@@ -589,65 +589,228 @@ export function calculateCumulativeUserStats(
   });
 }
 
+const TEAM_ABBR_NORMALIZATION: Record<string, string> = {
+  WSH: 'WAS',
+  LA: 'LAR',
+  OAK: 'LV',
+  SD: 'LAC',
+  STL: 'LAR',
+};
+
+const GAME_STATUS_RANK: Record<string, number> = {
+  scheduled: 0,
+  in_progress: 1,
+  final: 2,
+};
+
+function normalizeTeamAbbr(id?: string | null): string {
+  if (!id) return '';
+  const upper = String(id).trim().toUpperCase();
+  return TEAM_ABBR_NORMALIZATION[upper] || upper;
+}
+
+function isSameNFLGame(a: NFLGame, b: NFLGame): boolean {
+  if (a.id && b.id && String(a.id) === String(b.id)) return true;
+  const aHome = normalizeTeamAbbr(a.homeTeam?.id || a.homeTeam?.abbreviation);
+  const aAway = normalizeTeamAbbr(a.awayTeam?.id || a.awayTeam?.abbreviation);
+  const bHome = normalizeTeamAbbr(b.homeTeam?.id || b.homeTeam?.abbreviation);
+  const bAway = normalizeTeamAbbr(b.awayTeam?.id || b.awayTeam?.abbreviation);
+  return Boolean(aHome && aAway && aHome === bHome && aAway === bAway);
+}
+
+function isValidScore(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && val >= 0;
+}
+
+function parseClockSeconds(clock?: string | null): number | null {
+  if (!clock || typeof clock !== 'string') return null;
+  const parts = clock.trim().split(':');
+  if (parts.length !== 2) return null;
+  const mins = parseInt(parts[0], 10);
+  const secs = parseInt(parts[1], 10);
+  if (isNaN(mins) || isNaN(secs)) return null;
+  return mins * 60 + secs;
+}
+
+function parseQuarterRank(quarter?: string | null): number | null {
+  if (!quarter || typeof quarter !== 'string') return null;
+  const q = quarter.trim().toUpperCase();
+  if (q === '1Q' || q === '1' || q === 'Q1') return 1;
+  if (q === '2Q' || q === '2' || q === 'Q2') return 2;
+  if (q.includes('MEDIO') || q.includes('HALF') || q === 'HT') return 2.5;
+  if (q === '3Q' || q === '3' || q === 'Q3') return 3;
+  if (q === '4Q' || q === '4' || q === 'Q4') return 4;
+  if (q === 'OT' || q === 'TE' || q.includes('OVERTIME') || q === '5Q') return 5;
+  if (q.includes('FINAL')) return 6;
+  return null;
+}
+
+function getLiveGameProgress(quarter?: string | null, clock?: string | null): number | null {
+  const qRank = parseQuarterRank(quarter);
+  if (qRank === null) return null;
+  if (qRank === 2.5 || qRank === 6) return qRank * 10000;
+  const remSecs = parseClockSeconds(clock);
+  if (remSecs === null) return qRank * 10000;
+  const elapsed = Math.max(0, 900 - remSecs);
+  return qRank * 10000 + elapsed;
+}
+
+function sanitizeGameNulls(game: NFLGame): NFLGame {
+  const cleaned: NFLGame = {
+    ...game,
+    homeScore: game.status !== 'scheduled' && isValidScore(game.homeScore) ? game.homeScore : undefined,
+    awayScore: game.status !== 'scheduled' && isValidScore(game.awayScore) ? game.awayScore : undefined,
+    quarter: game.quarter || undefined,
+    clock: game.clock || undefined,
+    winnerTeamId: game.status === 'final' ? (game.winnerTeamId || undefined) : undefined,
+    spread: game.spread || undefined,
+  };
+  return cleaned;
+}
+
 /**
  * Safely merge two lists of games without losing live scores, quarters, clocks, or final results.
- * Prevents flickering or reverting to scheduled state when background polls arrive.
+ * Prevents flickering or reverting to scheduled/0-0 state when background polls arrive.
  */
 export function mergeGameLists(baseGames: NFLGame[] = [], incomingGames: NFLGame[] = []): NFLGame[] {
-  if (!incomingGames || incomingGames.length === 0) return baseGames || [];
-  if (!baseGames || baseGames.length === 0) return incomingGames || [];
+  const cleanBase = (baseGames || []).map(sanitizeGameNulls);
+  const cleanIncoming = (incomingGames || []).map(sanitizeGameNulls);
 
-  const matchedIncomingIds = new Set<string>();
+  if (cleanIncoming.length === 0) return cleanBase;
+  if (cleanBase.length === 0) return cleanIncoming;
 
-  const merged = baseGames.map((base) => {
-    const incoming = incomingGames.find(
-      (inc) =>
-        inc.id === base.id ||
-        (inc.homeTeam?.id === base.homeTeam?.id && inc.awayTeam?.id === base.awayTeam?.id)
-    );
+  const matchedIncomingIndices = new Set<number>();
 
-    if (!incoming) return base;
-    matchedIncomingIds.add(incoming.id);
+  const merged = cleanBase.map((base) => {
+    const incomingIdx = cleanIncoming.findIndex((inc) => isSameNFLGame(base, inc));
+    if (incomingIdx === -1) return base;
 
-    // Progression: final > in_progress > scheduled
-    let status = base.status;
-    if (incoming.status === 'final' || base.status === 'final') {
-      status = 'final';
-    } else if (incoming.status === 'in_progress' || base.status === 'in_progress') {
-      status = 'in_progress';
+    matchedIncomingIndices.add(incomingIdx);
+    const incoming = cleanIncoming[incomingIdx];
+
+    const baseRank = GAME_STATUS_RANK[base.status] ?? 0;
+    const incomingRank = GAME_STATUS_RANK[incoming.status] ?? 0;
+
+    const baseHasScores =
+      base.status !== 'scheduled' && isValidScore(base.homeScore) && isValidScore(base.awayScore);
+    const incomingHasScores =
+      incoming.status !== 'scheduled' &&
+      isValidScore(incoming.homeScore) &&
+      isValidScore(incoming.awayScore);
+
+    // Decide whether incoming carries newer/authoritative live or final state
+    let useIncomingLiveState = false;
+
+    if (incomingRank < baseRank) {
+      // Never allow scheduled/in_progress to downgrade an in_progress/final game
+      useIncomingLiveState = false;
+    } else if (incomingRank > baseRank) {
+      // Strictly advanced state (scheduled -> in_progress, in_progress -> final, scheduled -> final)
+      useIncomingLiveState = true;
+    } else if (baseRank === 0) {
+      // Both scheduled
+      useIncomingLiveState = true;
+    } else if (baseRank === 2) {
+      // Both final: never downgrade valid scores to null/undefined or lower total
+      if (incomingHasScores && baseHasScores) {
+        const baseTotal = base.homeScore! + base.awayScore!;
+        const incTotal = incoming.homeScore! + incoming.awayScore!;
+        useIncomingLiveState = incTotal >= baseTotal;
+      } else {
+        useIncomingLiveState = incomingHasScores;
+      }
     } else {
-      status = incoming.status || base.status || 'scheduled';
-    }
-
-    const hasIncomingHome = incoming.homeScore !== undefined && !isNaN(incoming.homeScore);
-    const hasIncomingAway = incoming.awayScore !== undefined && !isNaN(incoming.awayScore);
-
-    let homeScore = base.homeScore;
-    if (hasIncomingHome) {
-      if (status === 'final' && base.homeScore !== undefined && incoming.homeScore! < base.homeScore) {
-        homeScore = base.homeScore;
+      // Both in_progress: protect live scores, quarter, and clock from stale server reads
+      if (!incomingHasScores && baseHasScores) {
+        useIncomingLiveState = false;
+      } else if (incomingHasScores && !baseHasScores) {
+        useIncomingLiveState = true;
+      } else if (incomingHasScores && baseHasScores) {
+        const baseTotal = base.homeScore! + base.awayScore!;
+        const incTotal = incoming.homeScore! + incoming.awayScore!;
+        if (incTotal < baseTotal) {
+          useIncomingLiveState = false;
+        } else if (incTotal > baseTotal) {
+          useIncomingLiveState = true;
+        } else {
+          // Equal scores: compare quarter & clock progression
+          const baseProg = getLiveGameProgress(base.quarter, base.clock);
+          const incProg = getLiveGameProgress(incoming.quarter, incoming.clock);
+          if (baseProg !== null && incProg !== null) {
+            useIncomingLiveState = incProg >= baseProg;
+          } else if (baseProg !== null && incProg === null) {
+            useIncomingLiveState = false;
+          } else {
+            useIncomingLiveState = true;
+          }
+        }
       } else {
-        homeScore = incoming.homeScore;
+        const baseProg = getLiveGameProgress(base.quarter, base.clock);
+        const incProg = getLiveGameProgress(incoming.quarter, incoming.clock);
+        if (baseProg !== null && (incProg === null || incProg < baseProg)) {
+          useIncomingLiveState = false;
+        } else {
+          useIncomingLiveState = true;
+        }
       }
     }
 
-    let awayScore = base.awayScore;
-    if (hasIncomingAway) {
-      if (status === 'final' && base.awayScore !== undefined && incoming.awayScore! < base.awayScore) {
-        awayScore = base.awayScore;
+    const status = useIncomingLiveState ? incoming.status || base.status || 'scheduled' : base.status;
+
+    let homeScore: number | undefined;
+    let awayScore: number | undefined;
+    if (status !== 'scheduled') {
+      if (useIncomingLiveState) {
+        homeScore = isValidScore(incoming.homeScore)
+          ? incoming.homeScore
+          : isValidScore(base.homeScore)
+          ? base.homeScore
+          : undefined;
+        awayScore = isValidScore(incoming.awayScore)
+          ? incoming.awayScore
+          : isValidScore(base.awayScore)
+          ? base.awayScore
+          : undefined;
       } else {
-        awayScore = incoming.awayScore;
+        homeScore = isValidScore(base.homeScore)
+          ? base.homeScore
+          : isValidScore(incoming.homeScore)
+          ? incoming.homeScore
+          : undefined;
+        awayScore = isValidScore(base.awayScore)
+          ? base.awayScore
+          : isValidScore(incoming.awayScore)
+          ? incoming.awayScore
+          : undefined;
       }
     }
 
-    let winnerTeamId = incoming.winnerTeamId || base.winnerTeamId;
-    if (status === 'final' && homeScore !== undefined && awayScore !== undefined) {
-      if (homeScore > awayScore) {
-        winnerTeamId = incoming.homeTeam?.id || base.homeTeam?.id;
-      } else if (awayScore > homeScore) {
-        winnerTeamId = incoming.awayTeam?.id || base.awayTeam?.id;
+    const quarter =
+      status === 'scheduled'
+        ? undefined
+        : useIncomingLiveState
+        ? incoming.quarter || base.quarter || undefined
+        : base.quarter || incoming.quarter || undefined;
+
+    const clock =
+      status === 'scheduled'
+        ? incoming.clock || base.clock || undefined
+        : useIncomingLiveState
+        ? incoming.clock || base.clock || undefined
+        : base.clock || incoming.clock || undefined;
+
+    let winnerTeamId: string | undefined;
+    if (status === 'final') {
+      if (isValidScore(homeScore) && isValidScore(awayScore)) {
+        if (homeScore > awayScore) {
+          winnerTeamId = base.homeTeam?.id || incoming.homeTeam?.id;
+        } else if (awayScore > homeScore) {
+          winnerTeamId = base.awayTeam?.id || incoming.awayTeam?.id;
+        } else {
+          winnerTeamId = 'TIE';
+        }
       } else {
-        winnerTeamId = 'TIE';
+        winnerTeamId = base.winnerTeamId || incoming.winnerTeamId || undefined;
       }
     }
 
@@ -659,8 +822,8 @@ export function mergeGameLists(baseGames: NFLGame[] = [], incomingGames: NFLGame
       homeScore,
       awayScore,
       winnerTeamId,
-      quarter: incoming.quarter || base.quarter,
-      clock: incoming.clock || base.clock,
+      quarter,
+      clock,
       date: incoming.date || base.date,
       time: incoming.time || base.time,
       dateIso: incoming.dateIso || base.dateIso,
@@ -670,28 +833,26 @@ export function mergeGameLists(baseGames: NFLGame[] = [], incomingGames: NFLGame
       homeTeam: {
         ...base.homeTeam,
         ...(incoming.homeTeam || {}),
+        id: base.homeTeam?.id || incoming.homeTeam?.id,
         record: incoming.homeTeam?.record || base.homeTeam?.record || '0-0',
       },
       awayTeam: {
         ...base.awayTeam,
         ...(incoming.awayTeam || {}),
+        id: base.awayTeam?.id || incoming.awayTeam?.id,
         record: incoming.awayTeam?.record || base.awayTeam?.record || '0-0',
       },
     };
   });
 
-  for (const inc of incomingGames) {
-    if (!matchedIncomingIds.has(inc.id)) {
-      const alreadyPresent = merged.some(
-        (m) =>
-          m.id === inc.id ||
-          (m.homeTeam?.id === inc.homeTeam?.id && m.awayTeam?.id === inc.awayTeam?.id)
-      );
+  cleanIncoming.forEach((inc, idx) => {
+    if (!matchedIncomingIndices.has(idx)) {
+      const alreadyPresent = merged.some((m) => isSameNFLGame(m, inc));
       if (!alreadyPresent) {
         merged.push(inc);
       }
     }
-  }
+  });
 
   return merged;
 }

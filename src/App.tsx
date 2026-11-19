@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { QuinielaData, UserId, UserPick, UserProfile, WeekState } from './types';
 import { INITIAL_QUINIELA_STATE } from './data/initialData';
 import { SplashScreen } from './components/SplashScreen';
@@ -19,6 +19,8 @@ import { tournamentService } from './services/tournamentService';
 export default function App() {
   // Remote database authoritative state
   const [data, setData] = useState<QuinielaData>(INITIAL_QUINIELA_STATE);
+  const dataRef = useRef<QuinielaData>(data);
+  dataRef.current = data;
 
   // UI state
   const [currentTab, setCurrentTab] = useState<NavTab>('matches');
@@ -33,22 +35,25 @@ export default function App() {
 
   const currentWeek: WeekState = data.weeks[data.currentWeekId] || data.weeks[2] || data.weeks[1];
   const activeUser = data.activeUserId ? data.users[data.activeUserId] : null;
+  const hasLiveGames = Boolean(currentWeek?.games?.some((g) => g.status === 'in_progress'));
 
   // Synchronization with official NFL calendar and live scoreboard
   const syncWeekData = useCallback(async (weekId: number, silent: boolean = false) => {
     if (!silent) setIsSyncing(true);
     try {
       const scoreboard = await fetchNFLScoreboard(weekId);
-      let gamesToPersist: any[] = [];
+      const incomingGames = scoreboard.games || [];
+
+      // Compute merged games outside setData using dataRef so React batching never leaves gamesToPersist empty
+      const currentBaseGames = dataRef.current.weeks[weekId]?.games || [];
+      const gamesToPersist = mergeGameLists(currentBaseGames, incomingGames);
 
       setData((prev) => {
         const existingWeek = prev.weeks[weekId];
         const baseGames = existingWeek?.games || [];
-        const incomingGames = scoreboard.games || [];
 
         // Safely merge incoming scoreboard with existing games without dropping live data
         const mergedGames = mergeGameLists(baseGames, incomingGames);
-        gamesToPersist = mergedGames;
         const isAllFinished = mergedGames.length > 0 && mergedGames.every((g) => g.status === 'final');
 
         if (!existingWeek) {
@@ -97,7 +102,7 @@ export default function App() {
             [weekId]: {
               ...existingWeek,
               games: mergedGames,
-              isFinished: isAllFinished,
+              isFinished: existingWeek.isFinished || isAllFinished,
             },
           },
         };
@@ -107,9 +112,7 @@ export default function App() {
 
       // Persist the merged live game scores to Firestore so background state polls also receive them
       if (gamesToPersist.length > 0) {
-        tournamentService.syncGames(weekId, gamesToPersist).catch((err) => {
-          console.warn('Could not persist synced games to backend:', err);
-        });
+        await tournamentService.syncGames(weekId, gamesToPersist);
       }
     } catch (err) {
       console.warn('Could not sync with official NFL live feed:', err);
@@ -125,7 +128,6 @@ export default function App() {
 
   // Live polling interval for real-time scores
   useEffect(() => {
-    const hasLiveGames = currentWeek?.games?.some((g) => g.status === 'in_progress');
     // Poll every 30s during live games, or 60s otherwise
     const intervalTime = hasLiveGames ? 30000 : 60000;
 
@@ -134,7 +136,7 @@ export default function App() {
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [data.currentWeekId, currentWeek, syncWeekData]);
+  }, [data.currentWeekId, hasLiveGames, syncWeekData]);
 
   // Synchronize registered password status with backend database (works across devices, reload & cache clearing)
   useEffect(() => {
@@ -174,8 +176,25 @@ export default function App() {
   const refreshTournamentState = useCallback(async () => {
     try {
       const serverState = await tournamentService.getState();
-      const unsyncedPastWeeks: number[] = [];
       const nowMs = Date.now();
+      const unsyncedPastWeeks: number[] = [];
+
+      // Identify unsynced past weeks outside setData using dataRef
+      for (const wIdStr of Object.keys(serverState.weeks || {})) {
+        const wId = Number(wIdStr);
+        const serverWeek = serverState.weeks[wId];
+        const prevWeek = dataRef.current.weeks[wId];
+        if (!serverWeek) continue;
+
+        const baseGames = prevWeek?.games && prevWeek.games.length > 0 ? prevWeek.games : serverWeek.games;
+        const combinedGames = mergeGameLists(baseGames, serverWeek.games);
+        const isAllFinished = combinedGames.length > 0 && combinedGames.every((g) => g.status === 'final');
+
+        const firstKickoffMs = Date.parse(serverWeek.firstGameTime || '');
+        if (!isNaN(firstKickoffMs) && firstKickoffMs + 12 * 3600 * 1000 < nowMs && !isAllFinished) {
+          unsyncedPastWeeks.push(wId);
+        }
+      }
 
       setData((prev) => {
         // Merge serverState.weeks with prev.weeks without losing live games, quarters, clocks, or scores!
@@ -191,12 +210,6 @@ export default function App() {
             const baseGames = prevWeek.games && prevWeek.games.length > 0 ? prevWeek.games : serverWeek.games;
             const combinedGames = mergeGameLists(baseGames, serverWeek.games);
             const isAllFinished = combinedGames.length > 0 && combinedGames.every((g) => g.status === 'final');
-
-            // Check if this week's kickoff has already passed by >12 hours and still has scheduled games
-            const firstKickoffMs = Date.parse(serverWeek.firstGameTime || '');
-            if (!isNaN(firstKickoffMs) && firstKickoffMs + 12 * 3600 * 1000 < nowMs && !isAllFinished) {
-              unsyncedPastWeeks.push(wId);
-            }
 
             // Deep merge userPicks so that existing picks in memory are NEVER wiped by an empty response
             const mergedUserPicks: Record<UserId, Record<string, UserPick>> = {
@@ -230,7 +243,7 @@ export default function App() {
             mergedWeeks[wId] = {
               ...serverWeek,
               games: combinedGames,
-              isFinished: serverWeek.isFinished || isAllFinished,
+              isFinished: serverWeek.isFinished || prevWeek.isFinished || isAllFinished,
               userPicks: mergedUserPicks,
               submittedUsers: mergedSubmittedUsers,
               submittedAt: mergedSubmittedAt,

@@ -16,6 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { QuinielaData, UserId, UserPick, NFLGame, WeekState, UserProfile } from '../src/types';
 import { INITIAL_QUINIELA_STATE } from '../src/data/initialData';
+import { mergeGameLists } from '../src/utils/bettingRules';
 
 let dbInstance: Firestore | null = null;
 
@@ -486,7 +487,10 @@ export async function getFirestoreTournamentState(): Promise<QuinielaData> {
       firstGameTime: w.firstGameTime || 'Dom 13:00',
       opensAt: w.opensAt || 'Mie 00:00',
       locksAt: w.locksAt || 'Dom 13:00',
-      games: (w.games && w.games.length > 0) ? w.games : (INITIAL_QUINIELA_STATE.weeks[weekId]?.games || []),
+      games: mergeGameLists(
+        [],
+        (w.games && w.games.length > 0) ? w.games : (INITIAL_QUINIELA_STATE.weeks[weekId]?.games || [])
+      ),
       winners: w.winners || [],
       userPicks: {
         enrique: {},
@@ -696,100 +700,9 @@ export async function submitFirestoreWeekBets(
 }
 
 /**
- * Safely merge two lists of games without losing live scores, quarters, clocks, or final results.
+ * Sync live NFL games in Cloud Firestore without ever downgrading live/final scores
  */
-function mergeGameLists(baseGames: NFLGame[] = [], incomingGames: NFLGame[] = []): NFLGame[] {
-  if (!incomingGames || incomingGames.length === 0) return baseGames || [];
-  if (!baseGames || baseGames.length === 0) return incomingGames || [];
-
-  const matchedIncomingIds = new Set<string>();
-
-  const merged = baseGames.map((base) => {
-    const incoming = incomingGames.find(
-      (inc) =>
-        inc.id === base.id ||
-        (inc.homeTeam?.id === base.homeTeam?.id && inc.awayTeam?.id === base.awayTeam?.id)
-    );
-
-    if (!incoming) return base;
-    matchedIncomingIds.add(incoming.id);
-
-    // Determine progression: final > in_progress > scheduled
-    let status = base.status;
-    if (incoming.status === 'final' || base.status === 'final') {
-      status = 'final';
-    } else if (incoming.status === 'in_progress' || base.status === 'in_progress') {
-      status = 'in_progress';
-    } else {
-      status = incoming.status || base.status || 'scheduled';
-    }
-
-    const hasIncomingHome = incoming.homeScore !== undefined && !isNaN(incoming.homeScore);
-    const hasIncomingAway = incoming.awayScore !== undefined && !isNaN(incoming.awayScore);
-
-    const homeScore = hasIncomingHome ? incoming.homeScore : base.homeScore;
-    const awayScore = hasIncomingAway ? incoming.awayScore : base.awayScore;
-
-    let winnerTeamId = incoming.winnerTeamId || base.winnerTeamId;
-    if (status === 'final' && homeScore !== undefined && awayScore !== undefined) {
-      if (homeScore > awayScore) {
-        winnerTeamId = incoming.homeTeam?.id || base.homeTeam?.id;
-      } else if (awayScore > homeScore) {
-        winnerTeamId = incoming.awayTeam?.id || base.awayTeam?.id;
-      } else {
-        winnerTeamId = 'TIE';
-      }
-    }
-
-    return {
-      ...base,
-      ...incoming,
-      id: base.id || incoming.id,
-      status,
-      homeScore,
-      awayScore,
-      winnerTeamId,
-      quarter: incoming.quarter || base.quarter,
-      clock: incoming.clock || base.clock,
-      date: incoming.date || base.date,
-      time: incoming.time || base.time,
-      dateIso: incoming.dateIso || base.dateIso,
-      tvNetwork: incoming.tvNetwork || base.tvNetwork,
-      stadium: incoming.stadium || base.stadium,
-      spread: incoming.spread || base.spread,
-      homeTeam: {
-        ...base.homeTeam,
-        ...(incoming.homeTeam || {}),
-        record: incoming.homeTeam?.record || base.homeTeam?.record || '0-0',
-      },
-      awayTeam: {
-        ...base.awayTeam,
-        ...(incoming.awayTeam || {}),
-        record: incoming.awayTeam?.record || base.awayTeam?.record || '0-0',
-      },
-    };
-  });
-
-  for (const inc of incomingGames) {
-    if (!matchedIncomingIds.has(inc.id)) {
-      const alreadyPresent = merged.some(
-        (m) =>
-          m.id === inc.id ||
-          (m.homeTeam?.id === inc.homeTeam?.id && m.awayTeam?.id === inc.awayTeam?.id)
-      );
-      if (!alreadyPresent) {
-        merged.push(inc);
-      }
-    }
-  }
-
-  return merged;
-}
-
-/**
- * Sync live NFL games in Cloud Firestore
- */
-export async function syncFirestoreGames(weekId: number, incomingGames: NFLGame[]): Promise<void> {
+export async function syncFirestoreGames(weekId: number, incomingGames: NFLGame[]): Promise<NFLGame[]> {
   await ensureFirestoreInitialized();
   const db = getDb();
 
@@ -800,7 +713,9 @@ export async function syncFirestoreGames(weekId: number, incomingGames: NFLGame[
     const existingWeekData = weekSnap.data() as any;
     const existingGames: NFLGame[] = existingWeekData.games || [];
     const mergedGames = mergeGameLists(existingGames, incomingGames);
-    const isFinished = mergedGames.length > 0 && mergedGames.every((g) => g.status === 'final');
+    const isFinished =
+      Boolean(existingWeekData.isFinished) ||
+      (mergedGames.length > 0 && mergedGames.every((g) => g.status === 'final'));
 
     await updateDoc(
       weekRef,
@@ -810,7 +725,10 @@ export async function syncFirestoreGames(weekId: number, incomingGames: NFLGame[
         updatedAt: new Date().toISOString(),
       })
     );
+    return mergedGames;
   }
+
+  return mergeGameLists([], incomingGames);
 }
 
 /**

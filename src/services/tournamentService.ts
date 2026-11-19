@@ -6,7 +6,7 @@ export const tournamentService = {
    * Survives page reloads, browser closes, and synchronizes across all devices.
    */
   async getState(): Promise<QuinielaData> {
-    const res = await fetch('/api/tournament/state');
+    const res = await fetch('/api/tournament/state', { cache: 'no-store' });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: Error al obtener el estado del torneo`);
     }
@@ -80,9 +80,9 @@ export const tournamentService = {
   /**
    * Send live NFL score updates to server to synchronize database.
    */
-  async syncGames(weekId: number, games: NFLGame[]): Promise<void> {
+  async syncGames(weekId: number, games: NFLGame[]): Promise<NFLGame[] | null> {
     try {
-      await fetch('/api/tournament/sync-games', {
+      const res = await fetch('/api/tournament/sync-games', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -92,8 +92,15 @@ export const tournamentService = {
           games,
         }),
       });
+      if (!res.ok) {
+        console.warn(`Could not sync games with backend: HTTP ${res.status}`);
+        return null;
+      }
+      const data = await res.json();
+      return Array.isArray(data?.games) ? data.games : null;
     } catch (err) {
       console.warn('Could not sync games with backend:', err);
+      return null;
     }
   },
 };
